@@ -1,0 +1,14 @@
+# Build output
+/bin/
+/dist/
+*.out
+*.test
+*.exe
+
+# IDE
+.idea/
+.vscode/
+
+# Local env (no secrets in this repo, but never commit one if it appears)
+.env
+.envrc
