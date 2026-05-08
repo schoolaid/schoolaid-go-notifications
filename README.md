@@ -27,14 +27,20 @@ client, err := notifications.NewClient(cfg)
 if err != nil { return err }
 defer client.Close()
 
-err = client.PublishEmail(ctx, notifications.EmailMessage{
+err = client.PublishPush(ctx, notifications.PushMessage{
+    NoteID:   1001,
     SchoolID: 42,
     UserID:   99,
-    Email:    "foo@example.com",
-    Subject:  "Hello",
-    Content:  "<p>hi</p>",
+    Title:    "Nueva circular: Example",
+    Devices:  []string{"fcm-token-a", "fcm-token-b"},
+    Data:     map[string]string{"item_id": "1001", "notification_type": "note"},
 })
 ```
+
+Schemas mirror the consumer at
+[`github.com/schoolaid/notifications`](https://github.com/schoolaid/notifications)
+(`internal/models/event.go` + `batch.go`). Producers MUST match — mismatched
+fields land in the DLQ.
 
 ## Environment
 

@@ -35,11 +35,18 @@ func main() {
 			Content:   "<p>hello from go</p>",
 			Important: false,
 			Channels:  []string{"push", "email"},
+			PushTitle: map[string]string{
+				"es": "Nueva circular: Example note",
+				"en": "New message: Example note",
+			},
 		},
 		Recipient: notifications.Recipient{
-			"student_id": int64(7),
-			"push_users": []map[string]any{
-				{"user_id": 1, "device_ids": []string{"abc"}},
+			StudentID: 7,
+			Users: []notifications.PushUser{
+				{UserID: 1, Language: "es", Devices: []string{"abc"}},
+			},
+			EmailUsers: []notifications.EmailUser{
+				{UserID: 1, Email: "parent@example.com"},
 			},
 		},
 	})

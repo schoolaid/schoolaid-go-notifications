@@ -45,7 +45,7 @@ func (c *Client) Topics() Topics { return c.topics }
 
 // PublishNoteCreated routes to the priority topic when n.Note.Important is true
 // and to the regular topic otherwise. The partition key is the recipient's
-// student_id when present, falling back to the note id — matching
+// student_id when present, falling back to the note id — matching the Laravel
 // NoteMessage::kafkaKey().
 func (c *Client) PublishNoteCreated(ctx context.Context, n NoteCreated) error {
 	if n.Version == "" {
@@ -72,9 +72,9 @@ func (c *Client) PublishNoteCreated(ctx context.Context, n NoteCreated) error {
 		topic = c.topics.NoteCreatedPriority
 	}
 
-	key := strconv.FormatInt(n.Note.NoteID, 10)
-	if sid, ok := n.Recipient["student_id"]; ok {
-		key = stringifyKey(sid, key)
+	key := strconv.Itoa(n.Note.NoteID)
+	if n.Recipient.StudentID != 0 {
+		key = strconv.Itoa(n.Recipient.StudentID)
 	}
 
 	priority := PriorityNormal
@@ -84,7 +84,7 @@ func (c *Client) PublishNoteCreated(ctx context.Context, n NoteCreated) error {
 
 	return c.producer.Produce(ctx, topic, key, n, map[string]string{
 		"trace-id":  n.Metadata.TraceID,
-		"school-id": strconv.FormatInt(n.Note.SchoolID, 10),
+		"school-id": strconv.Itoa(n.Note.SchoolID),
 		"priority":  string(priority),
 	})
 }
@@ -101,9 +101,9 @@ func (c *Client) PublishEmail(ctx context.Context, m EmailMessage) error {
 	if m.Priority == "" {
 		m.Priority = PriorityNormal
 	}
-	return c.producer.Produce(ctx, c.topics.EmailBatch, strconv.FormatInt(m.UserID, 10), m, map[string]string{
+	return c.producer.Produce(ctx, c.topics.EmailBatch, strconv.Itoa(m.UserID), m, map[string]string{
 		"trace-id":  m.TraceID,
-		"school-id": strconv.FormatInt(m.SchoolID, 10),
+		"school-id": strconv.Itoa(m.SchoolID),
 		"priority":  string(m.Priority),
 	})
 }
@@ -119,9 +119,12 @@ func (c *Client) PublishPush(ctx context.Context, m PushMessage) error {
 	if m.Priority == "" {
 		m.Priority = PriorityNormal
 	}
-	return c.producer.Produce(ctx, c.topics.PushBatch, strconv.FormatInt(m.UserID, 10), m, map[string]string{
+	if m.Data == nil {
+		m.Data = map[string]string{}
+	}
+	return c.producer.Produce(ctx, c.topics.PushBatch, strconv.Itoa(m.UserID), m, map[string]string{
 		"trace-id":  m.TraceID,
-		"school-id": strconv.FormatInt(m.SchoolID, 10),
+		"school-id": strconv.Itoa(m.SchoolID),
 		"priority":  string(m.Priority),
 	})
 }
@@ -137,9 +140,9 @@ func (c *Client) PublishSMS(ctx context.Context, m SMSMessage) error {
 	if m.Priority == "" {
 		m.Priority = PriorityNormal
 	}
-	return c.producer.Produce(ctx, c.topics.SMSBatch, strconv.FormatInt(m.UserID, 10), m, map[string]string{
+	return c.producer.Produce(ctx, c.topics.SMSBatch, strconv.Itoa(m.UserID), m, map[string]string{
 		"trace-id":  m.TraceID,
-		"school-id": strconv.FormatInt(m.SchoolID, 10),
+		"school-id": strconv.Itoa(m.SchoolID),
 		"priority":  string(m.Priority),
 	})
 }
@@ -155,9 +158,9 @@ func (c *Client) PublishWhatsApp(ctx context.Context, m WhatsAppMessage) error {
 	if m.Priority == "" {
 		m.Priority = PriorityNormal
 	}
-	return c.producer.Produce(ctx, c.topics.WhatsAppBatch, strconv.FormatInt(m.UserID, 10), m, map[string]string{
+	return c.producer.Produce(ctx, c.topics.WhatsAppBatch, strconv.Itoa(m.UserID), m, map[string]string{
 		"trace-id":  m.TraceID,
-		"school-id": strconv.FormatInt(m.SchoolID, 10),
+		"school-id": strconv.Itoa(m.SchoolID),
 		"priority":  string(m.Priority),
 	})
 }
@@ -166,22 +169,4 @@ func (c *Client) PublishWhatsApp(ctx context.Context, m WhatsAppMessage) error {
 // first-class helper. The caller owns topic, key, and headers.
 func (c *Client) PublishRaw(ctx context.Context, topic, key string, payload any, headers map[string]string) error {
 	return c.producer.Produce(ctx, topic, key, payload, headers)
-}
-
-func stringifyKey(v any, fallback string) string {
-	switch x := v.(type) {
-	case string:
-		if x == "" {
-			return fallback
-		}
-		return x
-	case int:
-		return strconv.Itoa(x)
-	case int64:
-		return strconv.FormatInt(x, 10)
-	case float64:
-		return strconv.FormatInt(int64(x), 10)
-	default:
-		return fallback
-	}
 }

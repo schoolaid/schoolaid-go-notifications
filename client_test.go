@@ -3,7 +3,6 @@ package notifications
 import (
 	"context"
 	"encoding/json"
-	"strconv"
 	"testing"
 )
 
@@ -44,7 +43,7 @@ func TestPublishNoteCreated_RoutesPriorityTopic(t *testing.T) {
 			SchoolID:  7,
 			Important: true,
 		},
-		Recipient: Recipient{"student_id": int64(99)},
+		Recipient: Recipient{StudentID: 99},
 	})
 	if err != nil {
 		t.Fatalf("PublishNoteCreated: %v", err)
@@ -67,11 +66,25 @@ func TestPublishNoteCreated_RoutesPriorityTopic(t *testing.T) {
 	}
 }
 
-func TestPublishNoteCreated_DefaultsAndShape(t *testing.T) {
+func TestPublishNoteCreated_FallsBackToNoteIDForKey(t *testing.T) {
 	c, fp := newTestClient()
 
 	err := c.PublishNoteCreated(context.Background(), NoteCreated{
-		Note: Note{NoteID: 1, SchoolID: 2},
+		Note: Note{NoteID: 17, SchoolID: 1},
+	})
+	if err != nil {
+		t.Fatalf("PublishNoteCreated: %v", err)
+	}
+	if fp.key != "17" {
+		t.Errorf("key = %q, want \"17\" (note id fallback)", fp.key)
+	}
+}
+
+func TestPublishNoteCreated_Shape(t *testing.T) {
+	c, fp := newTestClient()
+
+	err := c.PublishNoteCreated(context.Background(), NoteCreated{
+		Note: Note{NoteID: 1, SchoolID: 2, Channels: []string{"push"}},
 	})
 	if err != nil {
 		t.Fatalf("PublishNoteCreated: %v", err)
@@ -99,15 +112,59 @@ func TestPublishNoteCreated_DefaultsAndShape(t *testing.T) {
 	}
 }
 
-func TestPublishEmail_RoutingAndKey(t *testing.T) {
+func TestPublishPush_MatchesConsumerWireFormat(t *testing.T) {
+	c, fp := newTestClient()
+
+	err := c.PublishPush(context.Background(), PushMessage{
+		NoteID:   123,
+		SchoolID: 7,
+		UserID:   55,
+		Title:    "Nueva circular: hola",
+		Devices:  []string{"tok-1", "tok-2"},
+		Data:     map[string]string{"item_id": "123", "notification_type": "note"},
+	})
+	if err != nil {
+		t.Fatalf("PublishPush: %v", err)
+	}
+
+	if fp.topic != DefaultTopicPushBatch {
+		t.Errorf("topic = %q, want %q", fp.topic, DefaultTopicPushBatch)
+	}
+	if fp.key != "55" {
+		t.Errorf("key = %q, want \"55\"", fp.key)
+	}
+
+	// Field names must line up with consumer model PushBatchMessage.
+	var decoded map[string]any
+	if err := json.Unmarshal(fp.payload, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for _, k := range []string{"event_id", "trace_id", "note_id", "school_id", "user_id", "title", "priority", "devices", "data"} {
+		if _, ok := decoded[k]; !ok {
+			t.Errorf("push payload missing key %q (consumer contract)", k)
+		}
+	}
+	// Devices and data must be the consumer-expected shapes
+	if _, ok := decoded["devices"].([]any); !ok {
+		t.Errorf("devices not a JSON array, got %T", decoded["devices"])
+	}
+	if data, ok := decoded["data"].(map[string]any); !ok {
+		t.Errorf("data not an object, got %T", decoded["data"])
+	} else if _, ok := data["item_id"].(string); !ok {
+		t.Errorf("data.item_id not a string (consumer expects map[string]string)")
+	}
+}
+
+func TestPublishEmail_MatchesConsumerWireFormat(t *testing.T) {
 	c, fp := newTestClient()
 
 	err := c.PublishEmail(context.Background(), EmailMessage{
-		SchoolID: 3,
-		UserID:   55,
-		Email:    "x@y.com",
-		Subject:  "hi",
-		Content:  "<p>hi</p>",
+		NoteID:    9,
+		SchoolID:  3,
+		UserID:    55,
+		Email:     "x@y.com",
+		Subject:   "hi",
+		Content:   "<p>hi</p>",
 	})
 	if err != nil {
 		t.Fatalf("PublishEmail: %v", err)
@@ -116,11 +173,20 @@ func TestPublishEmail_RoutingAndKey(t *testing.T) {
 	if fp.topic != DefaultTopicEmailBatch {
 		t.Errorf("topic = %q, want %q", fp.topic, DefaultTopicEmailBatch)
 	}
-	if fp.key != strconv.FormatInt(55, 10) {
+	if fp.key != "55" {
 		t.Errorf("key = %q, want \"55\"", fp.key)
 	}
 	if fp.headers["priority"] != string(PriorityNormal) {
 		t.Errorf("priority = %q, want normal (default)", fp.headers["priority"])
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(fp.payload, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	// note_id must be a number (not null) — consumer field is non-pointer int
+	if _, ok := decoded["note_id"].(float64); !ok {
+		t.Errorf("note_id should be a number, got %T (%v)", decoded["note_id"], decoded["note_id"])
 	}
 }
 
