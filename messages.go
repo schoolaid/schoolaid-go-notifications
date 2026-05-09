@@ -53,8 +53,9 @@ type Recipient struct {
 }
 
 // Note holds the note-level body for a NoteCreated event.
-// PushTitle keys are language codes ("es", "en"); the consumer's
-// Note.PushTitleFor() falls back to "es" then to Title.
+// PushTitle and PushBody keys are language codes ("es", "en"); the
+// consumer's Note.PushTitleFor / PushBodyFor fall back to "es" then to
+// Title (for PushTitle) or empty string (for PushBody).
 type Note struct {
 	NoteID        int               `json:"note_id"`
 	SchoolID      int               `json:"school_id"`
@@ -62,6 +63,7 @@ type Note struct {
 	Subject       string            `json:"subject"`
 	FromName      string            `json:"from_name"`
 	PushTitle     map[string]string `json:"push_title,omitempty"`
+	PushBody      map[string]string `json:"push_body,omitempty"`
 	Content       string            `json:"content"`
 	Important     bool              `json:"important"`
 	FeaturedImage *string           `json:"featured_image"`
@@ -100,6 +102,7 @@ type PushMessage struct {
 	StudentID int               `json:"student_id"`
 	UserID    int               `json:"user_id"`
 	Title     string            `json:"title"`
+	Body      string            `json:"body,omitempty"`
 	ImageURL  *string           `json:"image_url,omitempty"`
 	Priority  Priority          `json:"priority"`
 	Devices   []string          `json:"devices"`
