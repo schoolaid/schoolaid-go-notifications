@@ -90,6 +90,13 @@ type Note struct {
 // consumer — it exists only to be persisted as history.
 //
 // This is the guard against double fan-out. See the Channels field comment.
+//
+// ⚠️ It tests LENGTH, not content. Channels{""} has length 1 and is therefore
+// NOT delivery-less — a fan-out consumer will look for a channel named "" and
+// deliver nothing anyway, but through the "unknown channel" path rather than
+// the persist-only one. Producers must not emit blank channel values, and
+// consumers should validate channel names rather than assume this predicate
+// screens them.
 func (n Note) IsDeliveryless() bool { return len(n.Channels) == 0 }
 
 type EventMetadata struct {
@@ -180,6 +187,11 @@ type WhatsAppMessage struct {
 // Command actions carried by PushCommand.Action.
 const (
 	// ActionBusOff turns a bus device off. The first command in use.
+	//
+	// ⚠️ Action is an OPEN set, like notification_type: a consumer meeting an
+	// unknown action must log it and count it, never silently drop the
+	// message. A dropped command is indistinguishable from a delivered one
+	// from the producer's side.
 	ActionBusOff = "off"
 )
 
@@ -200,10 +212,21 @@ const (
 // Consequently a message on the push batch topic with no attribution is a
 // DEFECT, not a command. Log it and count it; never silently drop it.
 type PushCommand struct {
-	EventID  string            `json:"event_id"`
-	TraceID  string            `json:"trace_id"`
-	SchoolID int               `json:"school_id"`
-	Action   string            `json:"action"`
+	EventID  string `json:"event_id"`
+	TraceID  string `json:"trace_id"`
+	SchoolID int    `json:"school_id"`
+	Action   string `json:"action"`
+	// Devices is the exact set of device tokens to command. It MUST be
+	// non-empty, and PublishPushCommand rejects it if it is not.
+	//
+	// ⚠️ EMPTY HAS NO LEGITIMATE MEANING HERE, WHICH IS WHY IT IS AN ERROR
+	// RATHER THAN A CONVENTION. Contrast Channels, where empty means
+	// "persist-only" and is a deliberate signal. An empty device list reads
+	// three different ways to a consumer — nothing, unknown, or "everything in
+	// SchoolID" — and the last one is the dangerous reading: a producer bug
+	// that builds an empty slice would turn off EVERY bus in the school. There
+	// is no command whose correct audience is "no devices", so the ambiguity
+	// is removed at the source instead of each consumer guessing.
 	Devices  []string          `json:"devices"`
 	Priority Priority          `json:"priority"`
 	Data     map[string]string `json:"data,omitempty"`

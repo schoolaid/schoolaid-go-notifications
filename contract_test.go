@@ -1,6 +1,9 @@
 package notifications
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 // The double-fan-out guard, as a test rather than a comment.
 //
@@ -50,3 +53,61 @@ func TestPushCommandTopicIsOverridable(t *testing.T) {
 		t.Errorf("override ignored, got %q", tp.PushCommand)
 	}
 }
+
+// ⚠️ An empty device list must be REFUSED, not published.
+//
+// The dangerous reading of `devices: []` is "everything in SchoolID", which
+// would turn a producer bug into a school-wide bus shutdown. Unlike Channels,
+// empty has no legitimate meaning here, so it is rejected at the source rather
+// than left for each consumer to guess. Caught by qa-1 before v0.4.0.
+func TestPublishPushCommandRefusesEmptyDevices(t *testing.T) {
+	c := NewClientWithProducer(&recordingProducer{}, Topics{})
+
+	for name, devices := range map[string][]string{"nil": nil, "empty": {}} {
+		t.Run(name, func(t *testing.T) {
+			err := c.PublishPushCommand(context.Background(), PushCommand{
+				SchoolID: 3, Action: ActionBusOff, Devices: devices,
+			})
+			if err == nil {
+				t.Fatal("publishing a command with no devices must fail — an empty list " +
+					"risks being read downstream as a school-wide broadcast")
+			}
+		})
+	}
+}
+
+// The control: a real device list must still publish, or the guard has simply
+// broken the feature.
+func TestPublishPushCommandAcceptsRealDevices(t *testing.T) {
+	rec := &recordingProducer{}
+	c := NewClientWithProducer(rec, Topics{})
+	if err := c.PublishPushCommand(context.Background(), PushCommand{
+		SchoolID: 3, Action: ActionBusOff, Devices: []string{"tok-1"},
+	}); err != nil {
+		t.Fatalf("a command with devices must publish, got %v", err)
+	}
+	if rec.topic != DefaultTopicPushCommand {
+		t.Errorf("published to %q, want %q", rec.topic, DefaultTopicPushCommand)
+	}
+}
+
+// Channels{""} has length 1, so it is NOT delivery-less — documented, and
+// pinned so the predicate's len-based nature is not mistaken for validation.
+func TestBlankChannelValueIsNotTreatedAsPersistOnly(t *testing.T) {
+	if (Note{Channels: []string{""}}).IsDeliveryless() {
+		t.Error(`Channels{""} has length 1 and must NOT read as persist-only; ` +
+			"channel-name validation is the consumer's job, not this predicate's")
+	}
+}
+
+// recordingProducer captures what would have been published.
+type recordingProducer struct {
+	topic string
+	key   string
+}
+
+func (r *recordingProducer) Produce(ctx context.Context, topic, key string, payload any, headers map[string]string) error {
+	r.topic, r.key = topic, key
+	return nil
+}
+func (r *recordingProducer) Close() error { return nil }

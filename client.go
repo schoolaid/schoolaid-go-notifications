@@ -2,6 +2,7 @@ package notifications
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"time"
 
@@ -139,6 +140,16 @@ func (c *Client) PublishPush(ctx context.Context, m PushMessage) error {
 // addresses devices. With a single partition today the key is not load-bearing,
 // but it fixes per-school ordering if partitions are ever added.
 func (c *Client) PublishPushCommand(ctx context.Context, m PushCommand) error {
+	// ⚠️ REJECTED AT THE SOURCE, NOT LEFT TO CONSUMERS. An empty device list
+	// has no correct interpretation, and the plausible one — "everything in
+	// SchoolID" — turns a producer bug into a school-wide bus shutdown. There
+	// is no command whose intended audience is no devices, so this can only
+	// ever be a defect; failing the publish surfaces it at the producer where
+	// it can be fixed, instead of at N consumers each guessing.
+	if len(m.Devices) == 0 {
+		return errors.New("notifications: PushCommand.Devices is empty; refusing to publish a " +
+			"command with no target devices (an empty list risks being read as school-wide broadcast)")
+	}
 	if m.EventID == "" {
 		m.EventID = uuid.NewString()
 	}
