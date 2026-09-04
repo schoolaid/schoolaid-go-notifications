@@ -129,6 +129,36 @@ func (c *Client) PublishPush(ctx context.Context, m PushMessage) error {
 	})
 }
 
+// PublishPushCommand puts a device command on the command topic.
+//
+// ⚠️ NOT the push batch topic, deliberately — see PushCommand's doc comment.
+// The persistence consumer does not subscribe here, so a command cannot be
+// stored as user history by any path.
+//
+// Keyed by school rather than by user because a command has no user: it
+// addresses devices. With a single partition today the key is not load-bearing,
+// but it fixes per-school ordering if partitions are ever added.
+func (c *Client) PublishPushCommand(ctx context.Context, m PushCommand) error {
+	if m.EventID == "" {
+		m.EventID = uuid.NewString()
+	}
+	if m.TraceID == "" {
+		m.TraceID = uuid.NewString()
+	}
+	if m.Priority == "" {
+		m.Priority = PriorityNormal
+	}
+	if m.Data == nil {
+		m.Data = map[string]string{}
+	}
+	return c.producer.Produce(ctx, c.topics.PushCommand, strconv.Itoa(m.SchoolID), m, map[string]string{
+		"trace-id":  m.TraceID,
+		"school-id": strconv.Itoa(m.SchoolID),
+		"priority":  string(m.Priority),
+		"action":    m.Action,
+	})
+}
+
 // PublishSMS puts one entry on the SMS batch topic.
 func (c *Client) PublishSMS(ctx context.Context, m SMSMessage) error {
 	if m.EventID == "" {

@@ -67,6 +67,7 @@ type Config struct {
 //	KAFKA_TOPIC_NOTE_CREATED_PRIORITY-> Topics.NoteCreatedPriority
 //	KAFKA_TOPIC_EMAIL_BATCH          -> Topics.EmailBatch
 //	KAFKA_TOPIC_PUSH_BATCH           -> Topics.PushBatch
+//	KAFKA_TOPIC_PUSH_COMMAND         -> Topics.PushCommand
 //	KAFKA_TOPIC_SMS_BATCH            -> Topics.SMSBatch
 //	KAFKA_TOPIC_WHATSAPP_BATCH       -> Topics.WhatsAppBatch
 //	KAFKA_TOPIC_DLQ                  -> Topics.DLQ
@@ -86,6 +87,7 @@ func ConfigFromEnv() Config {
 			NoteCreatedPriority: os.Getenv("KAFKA_TOPIC_NOTE_CREATED_PRIORITY"),
 			EmailBatch:          os.Getenv("KAFKA_TOPIC_EMAIL_BATCH"),
 			PushBatch:           os.Getenv("KAFKA_TOPIC_PUSH_BATCH"),
+			PushCommand:         os.Getenv("KAFKA_TOPIC_PUSH_COMMAND"),
 			SMSBatch:            os.Getenv("KAFKA_TOPIC_SMS_BATCH"),
 			WhatsAppBatch:       os.Getenv("KAFKA_TOPIC_WHATSAPP_BATCH"),
 			DLQ:                 os.Getenv("KAFKA_TOPIC_DLQ"),

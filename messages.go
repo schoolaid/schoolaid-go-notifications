@@ -68,10 +68,30 @@ type Note struct {
 	Important     bool              `json:"important"`
 	FeaturedImage *string           `json:"featured_image"`
 	Signature     *string           `json:"signature"`
-	Channels      []string          `json:"channels"`
+	// Channels lists the DELIVERY transports a fan-out consumer must execute
+	// (push, email, whatsapp). It is not a transport field itself.
+	//
+	// ⚠️ EMPTY MEANS DELIVER NOTHING — the event is PERSIST-ONLY.
+	// A producer that already fanned out its own delivery (positions-api
+	// publishes straight to the push topic) emits note.created with an empty
+	// Channels purely so history has the pre-fanout event and its full
+	// recipient list. A fan-out consumer that ignores this WILL double-send:
+	// once from the producer's own fanout, once from the note event.
+	//
+	// Use IsDeliveryless() rather than testing len() at each call site, so the
+	// rule lives in one place. Non-empty means deliver via exactly those
+	// channels — schoolaid-admin's NoteMessage::deliveryChannels() always
+	// returns at least ["push"], so today no producer emits empty.
+	Channels []string `json:"channels"`
 }
 
 // EventMetadata carries tracing info on every NoteCreated event.
+// IsDeliveryless reports whether this note must NOT be delivered by a fan-out
+// consumer — it exists only to be persisted as history.
+//
+// This is the guard against double fan-out. See the Channels field comment.
+func (n Note) IsDeliveryless() bool { return len(n.Channels) == 0 }
+
 type EventMetadata struct {
 	TraceID     string  `json:"trace_id"`
 	UserID      int     `json:"user_id"`
@@ -155,4 +175,36 @@ type WhatsAppMessage struct {
 	Phone     string   `json:"phone"`
 	Text      string   `json:"text"`
 	Priority  Priority `json:"priority"`
+}
+
+// Command actions carried by PushCommand.Action.
+const (
+	// ActionBusOff turns a bus device off. The first command in use.
+	ActionBusOff = "off"
+)
+
+// PushCommand is a data-only DEVICE command: an instruction to a device, not a
+// message to a person.
+//
+// ⚠️ IT TRAVELS ON ITS OWN TOPIC (Topics.PushCommand) AND THAT IS DELIBERATE.
+// It deliberately carries NO user_id, student_id, title or body, because it is
+// not history and must never be persisted as such. Riding the push batch topic
+// with those fields nulled would make it indistinguishable — by absence alone —
+// from a genuine notification whose attribution an upstream bug had dropped,
+// and the persistence consumer would silently discard real history while
+// believing it was skipping a command. A separate topic makes the distinction
+// structural: the persistence consumer never subscribes here, so a command
+// cannot reach history by any path, and a misrouted message breaks DELIVERY,
+// which is loud, instead of HISTORY, which is silent.
+//
+// Consequently a message on the push batch topic with no attribution is a
+// DEFECT, not a command. Log it and count it; never silently drop it.
+type PushCommand struct {
+	EventID  string            `json:"event_id"`
+	TraceID  string            `json:"trace_id"`
+	SchoolID int               `json:"school_id"`
+	Action   string            `json:"action"`
+	Devices  []string          `json:"devices"`
+	Priority Priority          `json:"priority"`
+	Data     map[string]string `json:"data,omitempty"`
 }
