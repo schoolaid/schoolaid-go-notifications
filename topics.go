@@ -8,6 +8,7 @@ type Topics struct {
 	NoteCreatedPriority string
 	EmailBatch          string
 	PushBatch           string
+	PushCommand         string
 	SMSBatch            string
 	WhatsAppBatch       string
 	DLQ                 string
@@ -20,6 +21,7 @@ const (
 	DefaultTopicNoteCreatedPriority = "notifications.note.created.priority"
 	DefaultTopicEmailBatch          = "notifications.email.batch"
 	DefaultTopicPushBatch           = "notifications.push.batch"
+	DefaultTopicPushCommand         = "notifications.push.command"
 	DefaultTopicSMSBatch            = "notifications.sms.batch"
 	DefaultTopicWhatsAppBatch       = "notifications.whatsapp.batch"
 	DefaultTopicDLQ                 = "notifications.dlq"
@@ -44,6 +46,9 @@ func (t Topics) withDefaults() Topics {
 	}
 	if t.WhatsAppBatch == "" {
 		t.WhatsAppBatch = DefaultTopicWhatsAppBatch
+	}
+	if t.PushCommand == "" {
+		t.PushCommand = DefaultTopicPushCommand
 	}
 	if t.DLQ == "" {
 		t.DLQ = DefaultTopicDLQ

@@ -68,10 +68,69 @@ type Note struct {
 	Important     bool              `json:"important"`
 	FeaturedImage *string           `json:"featured_image"`
 	Signature     *string           `json:"signature"`
-	Channels      []string          `json:"channels"`
+	// Channels lists the DELIVERY transports a fan-out consumer must execute
+	// (push, email, whatsapp). It is not a transport field itself.
+	//
+	// ⚠️ EMPTY MEANS DELIVER NOTHING — the event is PERSIST-ONLY.
+	// A producer that already fanned out its own delivery (positions-api
+	// publishes straight to the push topic) emits note.created with an empty
+	// Channels purely so history has the pre-fanout event and its full
+	// recipient list. A fan-out consumer that ignores this WILL double-send:
+	// once from the producer's own fanout, once from the note event.
+	//
+	// Use IsDeliveryless() rather than testing len() at each call site, so the
+	// rule lives in one place. Non-empty means deliver via exactly those
+	// channels — schoolaid-admin's NoteMessage::deliveryChannels() always
+	// returns at least ["push"], so today no producer emits empty.
+	Channels []string `json:"channels"`
+
+	// Store decides whether this notification becomes a HISTORY ROW. It is
+	// independent of Channels: Channels says who DELIVERS it, Store says
+	// whether it is REMEMBERED.
+	//
+	// ⚠️ A POINTER, DELIBERATELY — nil means "unset", which means PERSIST.
+	// This mirrors the legacy rule exactly: said-notifications stores unless
+	// the producer sent literal "0" (`if (request()->store !== "0")`), so an
+	// absent value has always meant "keep it".
+	//
+	// ⚠️ A PLAIN bool WOULD HAVE THE WRONG DEFAULT AND LOSE HISTORY SILENTLY.
+	// Go's zero value is false, so any producer that forgot the field would
+	// stop being persisted — no error, no log, just a user whose history
+	// quietly goes empty. That is the exact failure this work exists to
+	// prevent, arriving through the field meant to control it.
+	//
+	// Read it with ShouldPersist(), never directly.
+	Store *bool `json:"store,omitempty"`
 }
 
 // EventMetadata carries tracing info on every NoteCreated event.
+// ShouldPersist reports whether this notification becomes a history row.
+//
+// Unset (nil) means YES, mirroring legacy: said-notifications persists unless
+// the producer explicitly sent "0". Defaulting the other way would make a
+// forgotten field indistinguishable from a deliberate suppression, and the
+// consequence — a silently empty history — is invisible until a parent asks
+// where their notification went.
+func (n Note) ShouldPersist() bool { return n.Store == nil || *n.Store }
+
+// PersistFlag builds an explicit Store value.
+//
+//	Note{Store: notifications.PersistFlag(false)} // deliver, do not remember
+func PersistFlag(v bool) *bool { return &v }
+
+// IsDeliveryless reports whether this note must NOT be delivered by a fan-out
+// consumer — it exists only to be persisted as history.
+//
+// This is the guard against double fan-out. See the Channels field comment.
+//
+// ⚠️ It tests LENGTH, not content. Channels{""} has length 1 and is therefore
+// NOT delivery-less — a fan-out consumer will look for a channel named "" and
+// deliver nothing anyway, but through the "unknown channel" path rather than
+// the persist-only one. Producers must not emit blank channel values, and
+// consumers should validate channel names rather than assume this predicate
+// screens them.
+func (n Note) IsDeliveryless() bool { return len(n.Channels) == 0 }
+
 type EventMetadata struct {
 	TraceID     string  `json:"trace_id"`
 	UserID      int     `json:"user_id"`
@@ -155,4 +214,52 @@ type WhatsAppMessage struct {
 	Phone     string   `json:"phone"`
 	Text      string   `json:"text"`
 	Priority  Priority `json:"priority"`
+}
+
+// Command actions carried by PushCommand.Action.
+const (
+	// ActionBusOff turns a bus device off. The first command in use.
+	//
+	// ⚠️ Action is an OPEN set, like notification_type: a consumer meeting an
+	// unknown action must log it and count it, never silently drop the
+	// message. A dropped command is indistinguishable from a delivered one
+	// from the producer's side.
+	ActionBusOff = "off"
+)
+
+// PushCommand is a data-only DEVICE command: an instruction to a device, not a
+// message to a person.
+//
+// ⚠️ IT TRAVELS ON ITS OWN TOPIC (Topics.PushCommand) AND THAT IS DELIBERATE.
+// It deliberately carries NO user_id, student_id, title or body, because it is
+// not history and must never be persisted as such. Riding the push batch topic
+// with those fields nulled would make it indistinguishable — by absence alone —
+// from a genuine notification whose attribution an upstream bug had dropped,
+// and the persistence consumer would silently discard real history while
+// believing it was skipping a command. A separate topic makes the distinction
+// structural: the persistence consumer never subscribes here, so a command
+// cannot reach history by any path, and a misrouted message breaks DELIVERY,
+// which is loud, instead of HISTORY, which is silent.
+//
+// Consequently a message on the push batch topic with no attribution is a
+// DEFECT, not a command. Log it and count it; never silently drop it.
+type PushCommand struct {
+	EventID  string `json:"event_id"`
+	TraceID  string `json:"trace_id"`
+	SchoolID int    `json:"school_id"`
+	Action   string `json:"action"`
+	// Devices is the exact set of device tokens to command. It MUST be
+	// non-empty, and PublishPushCommand rejects it if it is not.
+	//
+	// ⚠️ EMPTY HAS NO LEGITIMATE MEANING HERE, WHICH IS WHY IT IS AN ERROR
+	// RATHER THAN A CONVENTION. Contrast Channels, where empty means
+	// "persist-only" and is a deliberate signal. An empty device list reads
+	// three different ways to a consumer — nothing, unknown, or "everything in
+	// SchoolID" — and the last one is the dangerous reading: a producer bug
+	// that builds an empty slice would turn off EVERY bus in the school. There
+	// is no command whose correct audience is "no devices", so the ambiguity
+	// is removed at the source instead of each consumer guessing.
+	Devices  []string          `json:"devices"`
+	Priority Priority          `json:"priority"`
+	Data     map[string]string `json:"data,omitempty"`
 }
