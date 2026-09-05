@@ -2,6 +2,8 @@ package notifications
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -111,3 +113,63 @@ func (r *recordingProducer) Produce(ctx context.Context, topic, key string, payl
 	return nil
 }
 func (r *recordingProducer) Close() error { return nil }
+
+// ⚠️ THE DEFAULT DIRECTION IS THE WHOLE POINT OF THE POINTER.
+//
+// Legacy persists unless the producer sent literal "0", so an absent value has
+// always meant "keep it". A plain bool would invert that: Go's zero value is
+// false, so every producer that forgot the field would silently stop being
+// persisted — no error, no log, just a user whose history quietly empties.
+// This pins the safe direction so a "simplification" to a plain bool fails
+// here rather than in production months later.
+func TestShouldPersistDefaultsToYesWhenUnset(t *testing.T) {
+	if !(Note{}).ShouldPersist() {
+		t.Fatal("an unset Store must mean PERSIST — mirroring legacy's `store !== \"0\"`. " +
+			"Defaulting to false makes a forgotten field indistinguishable from a " +
+			"deliberate suppression, and silently empties history")
+	}
+	if !(Note{Store: PersistFlag(true)}).ShouldPersist() {
+		t.Error("explicit true must persist")
+	}
+	// The case that must be able to say no — otherwise the field is decoration.
+	if (Note{Store: PersistFlag(false)}).ShouldPersist() {
+		t.Error("explicit false must NOT persist, or suppression is impossible " +
+			"and the flag cannot express what legacy's store=0 expressed")
+	}
+}
+
+// Store and Channels are independent axes: deliver-without-remembering and
+// remember-without-delivering must both be expressible.
+func TestStoreAndChannelsAreIndependent(t *testing.T) {
+	deliverNotRemember := Note{Channels: []string{"push"}, Store: PersistFlag(false)}
+	if deliverNotRemember.IsDeliveryless() || deliverNotRemember.ShouldPersist() {
+		t.Error("deliver-but-do-not-remember must be expressible")
+	}
+
+	// positions-api's case: its own fanout delivers, the event exists only for history.
+	rememberNotDeliver := Note{Channels: []string{}}
+	if !rememberNotDeliver.IsDeliveryless() || !rememberNotDeliver.ShouldPersist() {
+		t.Error("remember-but-do-not-deliver must be expressible — this is exactly " +
+			"what positions-api emits")
+	}
+}
+
+// The field must survive the wire, and an unset Store must not serialise as
+// `"store":false` — that would turn "unset" into an explicit suppression at
+// the first hop.
+func TestStoreOmittedWhenUnset(t *testing.T) {
+	b, err := json.Marshal(Note{Title: "t"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(b), "\"store\"") {
+		t.Errorf("unset Store must be OMITTED, not emitted as false — a consumer "+
+			"reading explicit false would suppress history the producer never "+
+			"asked to suppress. got %s", b)
+	}
+
+	b2, _ := json.Marshal(Note{Title: "t", Store: PersistFlag(false)})
+	if !strings.Contains(string(b2), "\"store\":false") {
+		t.Errorf("an explicit false must reach the wire, got %s", b2)
+	}
+}

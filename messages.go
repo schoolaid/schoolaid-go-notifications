@@ -83,9 +83,41 @@ type Note struct {
 	// channels — schoolaid-admin's NoteMessage::deliveryChannels() always
 	// returns at least ["push"], so today no producer emits empty.
 	Channels []string `json:"channels"`
+
+	// Store decides whether this notification becomes a HISTORY ROW. It is
+	// independent of Channels: Channels says who DELIVERS it, Store says
+	// whether it is REMEMBERED.
+	//
+	// ⚠️ A POINTER, DELIBERATELY — nil means "unset", which means PERSIST.
+	// This mirrors the legacy rule exactly: said-notifications stores unless
+	// the producer sent literal "0" (`if (request()->store !== "0")`), so an
+	// absent value has always meant "keep it".
+	//
+	// ⚠️ A PLAIN bool WOULD HAVE THE WRONG DEFAULT AND LOSE HISTORY SILENTLY.
+	// Go's zero value is false, so any producer that forgot the field would
+	// stop being persisted — no error, no log, just a user whose history
+	// quietly goes empty. That is the exact failure this work exists to
+	// prevent, arriving through the field meant to control it.
+	//
+	// Read it with ShouldPersist(), never directly.
+	Store *bool `json:"store,omitempty"`
 }
 
 // EventMetadata carries tracing info on every NoteCreated event.
+// ShouldPersist reports whether this notification becomes a history row.
+//
+// Unset (nil) means YES, mirroring legacy: said-notifications persists unless
+// the producer explicitly sent "0". Defaulting the other way would make a
+// forgotten field indistinguishable from a deliberate suppression, and the
+// consequence — a silently empty history — is invisible until a parent asks
+// where their notification went.
+func (n Note) ShouldPersist() bool { return n.Store == nil || *n.Store }
+
+// PersistFlag builds an explicit Store value.
+//
+//	Note{Store: notifications.PersistFlag(false)} // deliver, do not remember
+func PersistFlag(v bool) *bool { return &v }
+
 // IsDeliveryless reports whether this note must NOT be delivered by a fan-out
 // consumer — it exists only to be persisted as history.
 //
