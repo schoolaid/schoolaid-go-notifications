@@ -171,13 +171,23 @@ type PushMessage struct {
 // EmailMessage is one entry on notifications.email.batch.
 // Consumer model: EmailBatchMessage in batch.go.
 type EmailMessage struct {
-	EventID       string            `json:"event_id"`
-	TraceID       string            `json:"trace_id"`
-	NoteID        int               `json:"note_id"`
-	SchoolID      int               `json:"school_id"`
-	StudentID     int               `json:"student_id"`
-	UserID        int               `json:"user_id"`
-	Email         string            `json:"email"`
+	EventID   string `json:"event_id"`
+	TraceID   string `json:"trace_id"`
+	NoteID    int    `json:"note_id"`
+	SchoolID  int    `json:"school_id"`
+	StudentID int    `json:"student_id"`
+	UserID    int    `json:"user_id"`
+	Email     string `json:"email"`
+
+	// RecipientType names the id-space UserID belongs to:
+	// RecipientTypeUserEmail (`user_email` table) or RecipientTypeStaff
+	// (`staff` table). It is NOT the `user` table on either path.
+	//
+	// ⚠️ REQUIRED FOR ANYTHING THAT KEYS ON THE RECIPIENT. Empty means the
+	// producer has not been updated; consumers must treat that as "unknown"
+	// and decline to record, rather than guessing a default — a wrong guess
+	// attributes a recipient to the wrong person and cannot be detected later.
+	RecipientType string            `json:"recipient_type,omitempty"`
 	FromName      string            `json:"from_name,omitempty"`
 	Subject       string            `json:"subject"`
 	Content       string            `json:"content"`
@@ -215,6 +225,54 @@ type WhatsAppMessage struct {
 	Text      string   `json:"text"`
 	Priority  Priority `json:"priority"`
 }
+
+// Recipient id-spaces for note emails.
+//
+// ⚠️ user_id ON AN EMAIL MESSAGE IS POLYMORPHIC, AND THAT IS THE PROBLEM THIS
+// SOLVES. Two independent producers write this one field from two different
+// tables, and both land on the same email topic:
+//
+//	family → NoteRecipientResolver::buildEmailUsers:329
+//	         'user_id' => $userEmail->id          → user_email.id
+//	staff  → NoteMessage.php:261
+//	         'user_id' => $staff['staff_id']      → staff.id
+//
+// Their low ids densely overlap, so anything keying on (note_id, user_id)
+// collides: staff #5 and family address #5 on one note are the same key.
+// Mixed staff+family is the NORMAL case for opt-in staff copies, not an edge.
+//
+// RecipientType is the discriminator. It must be set explicitly by the
+// producer — it cannot be inferred downstream, and inferring it from a null
+// student_id would silently misfile a family recipient into the staff
+// id-space, which is the exact data loss this exists to prevent.
+const (
+	// RecipientTypeUserEmail is the FAMILY path. UserID holds a `user_email`
+	// PK — an EMAIL ADDRESS row, not a person. One human with two addresses
+	// is two recipients here; that per-address unit is the correct one for
+	// open-tracking and is the semantics hsingli signed off on.
+	//
+	// Deliberately NOT named "user": `user_email.id` and `user.id` are
+	// different tables. Calling this "user" would be a false label, and a
+	// consumer joining recipient_id → user.id would resolve the wrong person
+	// or nobody at all — silently, since both ids are small positive ints.
+	RecipientTypeUserEmail = "user_email"
+
+	// RecipientTypeStaff is the STAFF path. UserID holds a `staff` PK.
+	RecipientTypeStaff = "staff"
+)
+
+// The set above is CLOSED, and "user" (the `user` table) is absent on purpose.
+//
+// schoolaid-admin does have producers that put a real `user.id` in this field
+// — StudentRecipientResolver:77,102,126,151 ('user_id' => $userEmail->user_id)
+// and UserRecipientResolver:67,91,114,138 — but those run on the LEGACY mail
+// channel, not on Kafka, so no such value reaches this contract today.
+//
+// Do not add a "user" constant pre-emptively. An accepted-but-unproduced label
+// only creates a way to mislabel a user_email id as a user id, which is the
+// defect this type exists to prevent. If a legacy path is ever moved onto
+// Kafka, adding the constant then is a deliberate, reviewable change; until
+// then an unknown value must fail closed at the consumer.
 
 // Command actions carried by PushCommand.Action.
 const (

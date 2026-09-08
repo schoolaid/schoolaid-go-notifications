@@ -173,3 +173,47 @@ func TestStoreOmittedWhenUnset(t *testing.T) {
 		t.Errorf("an explicit false must reach the wire, got %s", b2)
 	}
 }
+
+// ⚠️ THE DISCRIMINATOR THAT MAKES A RECEIPT ATTRIBUTABLE.
+//
+// user_id on an email message is polymorphic: schoolaid-admin sends a
+// user_email id on the family path and a STAFF id on the other, from separate
+// tables with densely overlapping low ids, to the same topic. Keying on
+// (note_id, user_id) therefore collides staff #5 with family address #5.
+//
+// These pin the literal values, because consumers store and compare them: a
+// silent rename to "USER" or "u" would not fail any build, and would instead
+// split one population into two in the data.
+//
+// "user_email" in particular must not drift to "user": the family path sends a
+// `user_email` PK, and the shorter name would be a false label pointing at a
+// different table. It is spelled out here so a "tidy-up" rename fails loudly.
+func TestRecipientTypeLiteralsAreStable(t *testing.T) {
+	if RecipientTypeUserEmail != "user_email" {
+		t.Errorf("RecipientTypeUserEmail must be %q, got %q", "user_email", RecipientTypeUserEmail)
+	}
+	if RecipientTypeStaff != "staff" {
+		t.Errorf("RecipientTypeStaff must be %q, got %q", "staff", RecipientTypeStaff)
+	}
+	if RecipientTypeUserEmail == RecipientTypeStaff {
+		t.Fatal("the two id-spaces must be distinguishable")
+	}
+}
+
+// Absent means UNKNOWN, never a default. A producer that has not been updated
+// must not be silently treated as the family type — that would attribute every
+// staff recipient to whichever email address happens to share their id.
+func TestRecipientTypeIsOmittedWhenUnset(t *testing.T) {
+	b, err := json.Marshal(EmailMessage{UserID: 5})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(b), "recipient_type") {
+		t.Errorf("unset RecipientType must be omitted, not emitted as \"\": %s", b)
+	}
+
+	b2, _ := json.Marshal(EmailMessage{UserID: 5, RecipientType: RecipientTypeStaff})
+	if !strings.Contains(string(b2), `"recipient_type":"staff"`) {
+		t.Errorf("an explicit type must reach the wire, got %s", b2)
+	}
+}
