@@ -217,3 +217,24 @@ func TestRecipientTypeIsOmittedWhenUnset(t *testing.T) {
 		t.Errorf("an explicit type must reach the wire, got %s", b2)
 	}
 }
+
+// The notifications consumer switches on these exact literals
+// (models.EmailLayoutNone / EmailLayoutDefault); an unknown value silently
+// falls back to the padded layout, so a renamed literal would quietly put
+// full-bleed campaign emails back inside the card.
+func TestEmailLayoutLiteralsAndWire(t *testing.T) {
+	if EmailLayoutNone != "none" || EmailLayoutDefault != "default" {
+		t.Fatalf("layout literals drifted: none=%q default=%q", EmailLayoutNone, EmailLayoutDefault)
+	}
+	out, err := json.Marshal(EmailMessage{Email: "x@y.com", Layout: EmailLayoutNone})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), `"layout":"none"`) {
+		t.Errorf("layout must be on the wire as \"layout\", got %s", out)
+	}
+	out, _ = json.Marshal(EmailMessage{Email: "x@y.com"})
+	if strings.Contains(string(out), "layout") {
+		t.Errorf("unset layout must be omitted, got %s", out)
+	}
+}

@@ -195,7 +195,22 @@ type EmailMessage struct {
 	Signature     string            `json:"signature,omitempty"`
 	Attachments   []EmailAttachment `json:"attachments,omitempty"`
 	Priority      Priority          `json:"priority"`
+
+	// Layout picks the HTML shell (EmailLayout*). Empty or EmailLayoutDefault:
+	// the service's padded card layout, as before the field existed.
+	// EmailLayoutNone: Content is a complete document sent as-is, with no
+	// wrapper, featured image or signature (email campaigns' full-bleed
+	// sections). Consumer: EmailBatchMessage.Layout in notifications.
+	Layout EmailLayout `json:"layout,omitempty"`
 }
+
+// EmailLayout selects how the notifications service renders Content.
+type EmailLayout string
+
+const (
+	EmailLayoutDefault EmailLayout = "default"
+	EmailLayoutNone    EmailLayout = "none"
+)
 
 // SMSMessage is one entry on notifications.sms.batch.
 // The consumer does not yet handle this topic; field shape mirrors the
